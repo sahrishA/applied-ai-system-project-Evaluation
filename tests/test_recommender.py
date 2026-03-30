@@ -30,16 +30,6 @@ def make_small_recommender() -> Recommender:
     return Recommender(songs)
 
 
-def make_weeknd_profile() -> UserProfile:
-    """Reusable profile for dark, electronic-leaning comparisons."""
-    return UserProfile(
-        favorite_genre="synthwave",
-        favorite_mood="moody",
-        target_energy=0.78,
-        likes_acoustic=False,
-    )
-
-
 def test_recommend_returns_songs_sorted_by_score():
     user = UserProfile(
         favorite_genre="pop",
