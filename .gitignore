@@ -13,3 +13,9 @@ venv/
 
 # Pytest cache
 .pytest_cache/
+
+# Environment variables (never commit credentials)
+.env
+
+# ChromaDB vector store (large binary files, rebuilt from API data)
+data/chromadb/

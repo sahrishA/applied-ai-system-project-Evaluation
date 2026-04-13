@@ -1,61 +1,53 @@
-from src.recommender import Song, UserProfile, Recommender
+from src.recommender import Game, UserGameProfile, Recommender
+
 
 def make_small_recommender() -> Recommender:
-    songs = [
-        Song(
+    games = [
+        Game(
             id=1,
-            title="Test Pop Track",
-            artist="Test Artist",
-            genre="pop",
-            mood="happy",
-            energy=0.8,
-            tempo_bpm=120,
-            valence=0.9,
-            danceability=0.8,
-            acousticness=0.2,
+            title="Shadow of the Abyss",
+            genres=["Role-playing (RPG)", "Hack and slash/Beat 'em up"],
+            platforms=["PC (Microsoft Windows)", "PlayStation 5"],
+            rating=88.0,
+            summary="A brutal action RPG set in a dying world.",
+            release_year=2022,
         ),
-        Song(
+        Game(
             id=2,
-            title="Chill Lofi Loop",
-            artist="Test Artist",
-            genre="lofi",
-            mood="chill",
-            energy=0.4,
-            tempo_bpm=80,
-            valence=0.6,
-            danceability=0.5,
-            acousticness=0.9,
+            title="Cozy Farm Days",
+            genres=["Simulator", "Adventure"],
+            platforms=["Nintendo Switch"],
+            rating=74.0,
+            summary="A relaxing farming sim with charming characters.",
+            release_year=2021,
         ),
     ]
-    return Recommender(songs)
+    return Recommender(games)
 
 
-def test_recommend_returns_songs_sorted_by_score():
-    user = UserProfile(
-        favorite_genre="pop",
-        favorite_mood="happy",
-        target_energy=0.8,
-        likes_acoustic=False,
+def test_recommend_returns_games_sorted_by_score():
+    user = UserGameProfile(
+        favorite_genres=["Role-playing (RPG)", "Hack and slash/Beat 'em up"],
+        favorite_platforms=["PC (Microsoft Windows)"],
+        min_rating=70.0,
     )
     rec = make_small_recommender()
     results = rec.recommend(user, k=2)
 
     assert len(results) == 2
-    # Starter expectation: the pop, happy, high energy song should score higher
-    assert results[0].genre == "pop"
-    assert results[0].mood == "happy"
+    # The action RPG should score higher for this user than the farming sim
+    assert results[0].title == "Shadow of the Abyss"
 
 
 def test_explain_recommendation_returns_non_empty_string():
-    user = UserProfile(
-        favorite_genre="pop",
-        favorite_mood="happy",
-        target_energy=0.8,
-        likes_acoustic=False,
+    user = UserGameProfile(
+        favorite_genres=["Role-playing (RPG)"],
+        favorite_platforms=["PC (Microsoft Windows)"],
+        min_rating=70.0,
     )
     rec = make_small_recommender()
-    song = rec.songs[0]
+    game = rec.games[0]
 
-    explanation = rec.explain_recommendation(user, song)
+    explanation = rec.explain_recommendation(user, game)
     assert isinstance(explanation, str)
     assert explanation.strip() != ""

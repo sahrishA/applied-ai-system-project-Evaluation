@@ -1,50 +1,64 @@
 """
-Command line runner for the Music Recommender Simulation.
+Command-line demo for the Video Game Recommender.
 
-This file helps you quickly run and test your recommender.
-
-You will implement the functions in recommender.py:
-- load_songs
-- score_song
-- recommend_songs
+Fetches games from IGDB for a set of seed titles, then scores them
+against several hardcoded user profiles to verify the pipeline works
+end-to-end before the Streamlit UI is added.
 """
 
-from src.recommender import load_songs, recommend_songs
+from src.igdb_client import search_games
+from src.recommender import UserGameProfile, igdb_result_to_game, recommend_games
+
+
+SEED_TITLES = [
+    "Hollow Knight",
+    "Elden Ring",
+    "Stardew Valley",
+    "Celeste",
+    "Hades",
+    "The Witcher 3",
+    "Dark Souls",
+    "Animal Crossing",
+]
+
+PROFILES = {
+    "Action RPG Fan": UserGameProfile(
+        favorite_genres=["Role-playing (RPG)", "Hack and slash/Beat 'em up"],
+        favorite_platforms=["PC (Microsoft Windows)"],
+        min_rating=75.0,
+    ),
+    "Indie Platformer Fan": UserGameProfile(
+        favorite_genres=["Platform", "Indie"],
+        favorite_platforms=["PC (Microsoft Windows)", "Nintendo Switch"],
+        min_rating=80.0,
+    ),
+    "Casual / Cozy Fan": UserGameProfile(
+        favorite_genres=["Simulator", "Adventure"],
+        favorite_platforms=["Nintendo Switch"],
+        min_rating=70.0,
+    ),
+}
 
 
 def main() -> None:
-    songs = load_songs("data/songs.csv") 
+    print("Fetching games from IGDB...")
+    games = []
+    seen_ids = set()
+    for title in SEED_TITLES:
+        results = search_games(title, limit=1)
+        for r in results:
+            if r["id"] not in seen_ids:
+                games.append(igdb_result_to_game(r))
+                seen_ids.add(r["id"])
 
-    profiles = {
-        "Chill Lofi": {
-            "favorite_genre": "lofi",
-            "favorite_mood": "chill",
-            "target_energy": 0.35,
-            "likes_acoustic": True,
-            "target_tempo_bpm": 75,
-        },
-        "Synthwave Pop": {
-            "favorite_genre": "synthwave",
-            "favorite_mood": "moody",
-            "target_energy": 0.78,
-            "likes_acoustic": False,
-            "target_tempo_bpm": 115,
-        },
-        "Reggaeton": {
-            "favorite_genre": "latin urbano",
-            "favorite_mood": "playful",
-            "target_energy": 0.82,
-            "likes_acoustic": False,
-            "target_tempo_bpm": 100,
-        },
-    }
+    print(f"Loaded {len(games)} games.\n")
 
-    for profile_name, user_prefs in profiles.items():
-        print(f"\n=== {profile_name} ===\n")
-        recommendations = recommend_songs(user_prefs, songs, k=5)
-        for song, score, explanation in recommendations:
-            print(f"{song['title']} - Score: {score:.2f}")
-            print(f"Because: {explanation}")
+    for profile_name, user in PROFILES.items():
+        print(f"=== {profile_name} ===")
+        recommendations = recommend_games(user, games, k=3)
+        for game, score, reasons in recommendations:
+            print(f"  {game.title} — Score: {score:.2f}")
+            print(f"  Why: {'; '.join(reasons) if reasons else 'General match'}")
             print()
 
 

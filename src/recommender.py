@@ -1,135 +1,111 @@
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
+import datetime
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
 
 @dataclass
-class Song:
-    """
-    Represents a song and its attributes.
-    Required by tests/test_recommender.py
-    """
+class Game:
+    """Represents a video game and its attributes."""
     id: int
     title: str
-    artist: str
-    genre: str
-    mood: str
-    energy: float
-    tempo_bpm: float
-    valence: float
-    danceability: float
-    acousticness: float
+    genres: List[str]
+    platforms: List[str]
+    rating: float        # IGDB community rating, 0–100
+    summary: str
+    release_year: int | None = None
+
 
 @dataclass
-class UserProfile:
-    """
-    Represents a user's taste preferences.
-    Required by tests/test_recommender.py
-    """
-    favorite_genre: str
-    favorite_mood: str
-    target_energy: float
-    likes_acoustic: bool
+class UserGameProfile:
+    """Represents a user's game preferences."""
+    favorite_genres: List[str]
+    favorite_platforms: List[str]
+    min_rating: float = 0.0
+
 
 class Recommender:
-    """
-    OOP implementation of the recommendation logic.
-    Required by tests/test_recommender.py
-    """
-    def __init__(self, songs: List[Song]):
-        self.songs = songs
+    """OOP interface for game recommendations."""
 
-    def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
-        # TODO: Implement recommendation logic
-        return self.songs[:k]
+    def __init__(self, games: List[Game]):
+        self.games = games
 
-    def explain_recommendation(self, user: UserProfile, song: Song) -> str:
-        # TODO: Implement explanation logic
-        return "Explanation placeholder"
+    def recommend(self, user: UserGameProfile, k: int = 5) -> List[Game]:
+        scored = [(game, score_game(user, game)[0]) for game in self.games]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [game for game, _ in scored[:k]]
 
-def load_songs(csv_path: str) -> List[Dict]:
+    def explain_recommendation(self, user: UserGameProfile, game: Game) -> str:
+        _, reasons = score_game(user, game)
+        if reasons:
+            return "; ".join(reasons)
+        return f"{game.title} was recommended based on your preferences."
+
+
+def igdb_result_to_game(result: dict) -> Game:
+    """Convert a raw IGDB API response dict into a Game dataclass."""
+    genres = [g["name"] for g in result.get("genres", [])]
+    platforms = [p["name"] for p in result.get("platforms", [])]
+    rating = result.get("rating", 0.0)
+    release_ts = result.get("first_release_date")
+    release_year = (
+        datetime.datetime.utcfromtimestamp(release_ts).year if release_ts else None
+    )
+    return Game(
+        id=result["id"],
+        title=result.get("name", "Unknown"),
+        genres=genres,
+        platforms=platforms,
+        rating=rating,
+        summary=result.get("summary", ""),
+        release_year=release_year,
+    )
+
+
+def score_game(user: UserGameProfile, game: Game) -> Tuple[float, List[str]]:
     """
-    Loads songs from a CSV file.
-    Required by src/main.py
-    """
-    import csv
-    songs = []
-    with open(csv_path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            songs.append({
-                'id': int(row['id']),
-                'title': row['title'],
-                'artist': row['artist'],
-                'genre': row['genre'],
-                'mood': row['mood'],
-                'energy': float(row['energy']),
-                'tempo_bpm': float(row['tempo_bpm']),
-                'valence': float(row['valence']),
-                'danceability': float(row['danceability']),
-                'acousticness': float(row['acousticness']),
-            })
-    return songs
+    Returns a weighted score (0.0–1.0) and a list of reasons for a game
+    against a user profile.
 
-def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """Returns a weighted score (0.0–1.0) and matched reasons for a song against a user profile."""
+    Weights:
+        Genre match   0.50
+        Platform match 0.30
+        Rating        0.20
+    """
     score = 0.0
     reasons = []
 
-    # Energy (0.30) — distance-based; target_energy is 0.0–1.0
-    energy_match = 1.0 - abs(song['energy'] - user_prefs.get('target_energy', 0.5))
-    score += 0.30 * energy_match
-    if energy_match >= 0.8:
-        reasons.append(f"Energy ({song['energy']}) closely matches your target")
+    # Genre match (0.50) — proportion of the user's favorite genres found in the game
+    if user.favorite_genres:
+        game_genres_lower = [g.lower() for g in game.genres]
+        matched = [g for g in user.favorite_genres if g.lower() in game_genres_lower]
+        genre_score = len(matched) / len(user.favorite_genres)
+        score += 0.50 * genre_score
+        if matched:
+            reasons.append(f"Matches your genre(s): {', '.join(matched)}")
 
-    # Mood (0.20) — exact string match
-    mood_match = 1.0 if song['mood'] == user_prefs.get('favorite_mood', '') else 0.0
-    score += 0.20 * mood_match
-    if mood_match:
-        reasons.append(f"Mood '{song['mood']}' matches your favorite mood")
+    # Platform match (0.30) — any overlap between preferred and available platforms
+    if user.favorite_platforms:
+        game_platforms_lower = [p.lower() for p in game.platforms]
+        matched = [
+            p for p in user.favorite_platforms
+            if any(p.lower() in gp for gp in game_platforms_lower)
+        ]
+        score += 0.30 * (1.0 if matched else 0.0)
+        if matched:
+            reasons.append(f"Available on {', '.join(matched)}")
 
-    # Tempo (0.15) — distance-based, normalized over a 100 BPM range
-    if 'target_tempo_bpm' in user_prefs:
-        tempo_match = 1.0 - min(abs(song['tempo_bpm'] - user_prefs['target_tempo_bpm']) / 100.0, 1.0)
-        score += 0.15 * tempo_match
-        if tempo_match >= 0.8:
-            reasons.append(f"Tempo ({song['tempo_bpm']} BPM) is close to your target")
-
-    # Valence (0.12) — distance-based
-    if 'target_valence' in user_prefs:
-        valence_match = 1.0 - abs(song['valence'] - user_prefs['target_valence'])
-        score += 0.12 * valence_match
-        if valence_match >= 0.8:
-            reasons.append(f"Valence ({song['valence']}) aligns with your preference")
-
-    # Danceability (0.10) — distance-based
-    if 'target_danceability' in user_prefs:
-        dance_match = 1.0 - abs(song['danceability'] - user_prefs['target_danceability'])
-        score += 0.10 * dance_match
-        if dance_match >= 0.8:
-            reasons.append(f"Danceability ({song['danceability']}) suits your style")
-
-    # Acousticness (0.08) — boolean preference
-    if 'likes_acoustic' in user_prefs:
-        likes_acoustic = user_prefs['likes_acoustic']
-        acoustic_match = song['acousticness'] if likes_acoustic else (1.0 - song['acousticness'])
-        score += 0.08 * acoustic_match
-        if acoustic_match >= 0.7:
-            label = 'acoustic' if likes_acoustic else 'non-acoustic'
-            reasons.append(f"Acousticness ({song['acousticness']}) fits your {label} preference")
-
-    # Genre (0.05) — exact string match
-    genre_match = 1.0 if song['genre'] == user_prefs.get('favorite_genre', '') else 0.0
-    score += 0.05 * genre_match
-    if genre_match:
-        reasons.append(f"Genre '{song['genre']}' matches your favorite genre")
+    # Rating (0.20) — normalized from 0–100
+    rating_score = min(game.rating, 100.0) / 100.0
+    score += 0.20 * rating_score
+    if game.rating >= 80:
+        reasons.append(f"Highly rated ({game.rating:.0f}/100)")
 
     return score, reasons
 
 
-def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, List[str]]]:
-    """Scores every song in the catalog and returns the top k matches sorted by score."""
-    scored = []
-    for song in songs:
-        score, reasons = score_song(user_prefs, song)
-        scored.append((song, score, reasons))
-
+def recommend_games(
+    user: UserGameProfile, games: List[Game], k: int = 5
+) -> List[Tuple[Game, float, List[str]]]:
+    """Scores every game in the catalog and returns the top k matches."""
+    scored = [(game, *score_game(user, game)) for game in games]
     return sorted(scored, key=lambda x: x[1], reverse=True)[:k]

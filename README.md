@@ -1,218 +1,138 @@
-# 🎵 Music Recommender Simulation
+# Video Game Recommender with RAG
 
 ## Project Summary
 
-In this project you will build and explain a small music recommender system.
-
-Your goal is to:
-
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-Replace this paragraph with your own summary of what your version does.
+A conversational video game recommender that asks you for your favorite games and uses Retrieval-Augmented Generation (RAG) to suggest titles you might enjoy. The system fetches live game data from the IGDB API, embeds game descriptions into a vector database for semantic search, and uses Claude to generate personalized recommendations with natural language explanations.
 
 ---
 
 ## How The System Works
 
-Explain your design in plain language.
+```
+User names favorite games
+        ↓
+IGDB API → fetch game metadata + descriptions
+        ↓
+Embed descriptions → store in ChromaDB vector store
+        ↓
+Semantic search → retrieve most similar games
+        ↓
+Claude API → generate personalized explanation
+        ↓
+Streamlit chat UI → display recommendations
+```
 
-Some prompts to answer:
+### Components
 
-- What features does each `Song` use in your system
-  - For example: genre, mood, energy, tempo
-- What information does your `UserProfile` store
-- How does your `Recommender` compute a score for each song
-- How do you choose which songs to recommend
+| Component | File | Role |
+|---|---|---|
+| IGDB Client | `src/igdb_client.py` | Authenticates with Twitch OAuth and queries the IGDB game database |
+| Recommender | `src/recommender.py` | Scores and ranks games using metadata + semantic similarity |
+| RAG Pipeline | `src/rag.py` | Embeds game descriptions and retrieves similar games via ChromaDB |
+| Chat UI | `src/main.py` | Streamlit bot interface that drives the conversation |
 
-You can include a simple diagram or bullet list if helpful.
+### Scoring Features
 
-- My system uses most features provided by the CSV, and will be listed by order of
-  importance: Energy, Mood, Tempo, Valence, Danceability, Acousticness, and Genre Match.
-- My Song objects will use the features above to represent itself, and UserProfile will use Favorite Genre, Favorite Mood, Target Energy, and Likes Acoustic. These are all data types that represents various data that can be used to recommend similar music to a user's taste.
-- My Recommender uses a simple weight equation system to compute a score for each song. Energy has the highest weight in recommendation, while Genre Match has the lowest. These songs get scored independently against the user profile. A 1 is a perfect match to a user's preference, while a 0 is a worst possible match. From the CSVs, we calculate a score for each song using a distance-based forumla. Any song scoring close to 1 are better fits for the UserProfile. 
+Game recommendations are ranked using a hybrid approach:
 
-The Potential biases expected so far are the weighing bias. A srong emphasis on the energy can cause some high-energy songs to be over rewarded and cause low-energy songs to be underrepresented. Another bias is the dataset itself. A small/uneven genre and mood coverage in the CSV can skew outputs with the recommender. Another bias I am expecting is the threshold. I don't know if having a fixed recommendation cutoff like .7 is best here, as it may be a bit too strict for niche users or the opposite for weak fit catalogs.
+- **Semantic similarity** — embedding distance between game descriptions (RAG retrieval)
+- **Genre match** — how closely genres align with the user's stated preferences
+- **Platform match** — whether games are available on preferred platforms
+- **Rating** — IGDB community rating as a quality signal
 
 ---
 
 ## Getting Started
 
-### Setup
+### Prerequisites
 
-1. Create a virtual environment (optional but recommended):
+- Python 3.10+
+- A [Twitch Developer account](https://dev.twitch.tv/console) for IGDB API access
+- An [Anthropic API key](https://console.anthropic.com/) for Claude-powered explanations
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
-
-2. Install dependencies
+### 1. Clone the repo
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/your-username/applied-ai-system-project.git
+cd applied-ai-system-project
 ```
 
-3. Run the app:
+### 2. Create a virtual environment
 
 ```bash
-python -m src.main
+py -m venv .venv
+.venv\Scripts\activate      # Windows
+source .venv/bin/activate   # Mac / Linux
+```
+
+### 3. Install dependencies
+
+**Essential (IGDB client):**
+```bash
+py -m pip install requests python-dotenv
+```
+
+**Full install (RAG + UI):**
+```bash
+py -m pip install -r requirements.txt
+```
+
+### 4. Set up credentials
+
+Create a `.env` file in the project root (this file is git-ignored and must never be committed):
+
+```
+IGDB_CLIENT_ID=your_twitch_client_id
+IGDB_CLIENT_SECRET=your_twitch_client_secret
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
+
+To get IGDB credentials:
+1. Sign in at [dev.twitch.tv/console](https://dev.twitch.tv/console)
+2. Register a new application — set OAuth Redirect URL to `http://localhost`
+3. Copy the **Client ID** and generate a **Client Secret**
+
+### 5. Run the app
+
+```bash
+py -m streamlit run src/main.py
 ```
 
 ### Running Tests
 
-Run the starter tests with:
-
 ```bash
-pytest
+py -m pytest
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `requests` | HTTP calls to the IGDB API |
+| `python-dotenv` | Loads credentials from `.env` |
+| `anthropic` | Claude API for generating recommendation explanations |
+| `chromadb` | Vector database for semantic game search (RAG retrieval) |
+| `sentence-transformers` | Converts game descriptions into embedding vectors |
+| `streamlit` | Chat UI |
+| `pandas` | Local game data caching |
+| `pytest` | Unit tests |
 
 ---
 
-## Experiments You Tried
+## Limitations and Known Biases
 
-Use this section to document the experiments you ran. For example:
-
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
-
----
-
-## Limitations and Risks
-
-Summarize some limitations of your recommender.
-
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
-
-You will go deeper on this in your model card.
+- **Popularity bias** — IGDB ratings skew toward well-known AAA titles; niche or indie games may be under-recommended
+- **Description quality** — RAG retrieval quality depends on how well IGDB's summaries describe a game; sparse summaries produce weaker embeddings
+- **Cold start** — recommendations improve as more games are embedded into the vector store over time
+- **Language** — the system currently only handles English-language queries and game descriptions
 
 ---
 
-## Reflection
+## Future Work
 
-Read and complete `model_card.md`:
-
-[**Model Card**](model_card.md)
-
-Write 1 to 2 paragraphs here about what you learned:
-
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
-
-
----
-
-## 7. `model_card_template.md`
-
-Combines reflection and model card framing from the Module 3 guidance. :contentReference[oaicite:2]{index=2}  
-
-```markdown
-# 🎧 Model Card - Music Recommender Simulation
-
-## 1. Model Name
-
-Give your recommender a name, for example:
-
-> VibeFinder 1.0
-
----
-
-## 2. Intended Use
-
-- What is this system trying to do
-- Who is it for
-
-Example:
-
-> This model suggests 3 to 5 songs from a small catalog based on a user's preferred genre, mood, and energy level. It is for classroom exploration only, not for real users.
-
----
-
-## 3. How It Works (Short Explanation)
-
-Describe your scoring logic in plain language.
-
-- What features of each song does it consider
-- What information about the user does it use
-- How does it turn those into a number
-
-Try to avoid code in this section, treat it like an explanation to a non programmer.
-
----
-
-## 4. Data
-
-Describe your dataset.
-
-- How many songs are in `data/songs.csv`
-- Did you add or remove any songs
-- What kinds of genres or moods are represented
-- Whose taste does this data mostly reflect
-
----
-
-## 5. Strengths
-
-Where does your recommender work well
-
-You can think about:
-- Situations where the top results "felt right"
-- Particular user profiles it served well
-- Simplicity or transparency benefits
-
----
-
-## 6. Limitations and Bias
-
-Where does your recommender struggle
-
-Some prompts:
-- Does it ignore some genres or moods
-- Does it treat all users as if they have the same taste shape
-- Is it biased toward high energy or one genre by default
-- How could this be unfair if used in a real product
-
----
-
-## 7. Evaluation
-
-How did you check your system
-
-Examples:
-- You tried multiple user profiles and wrote down whether the results matched your expectations
-- You compared your simulation to what a real app like Spotify or YouTube tends to recommend
-- You wrote tests for your scoring logic
-
-You do not need a numeric metric, but if you used one, explain what it measures.
-
----
-
-## 8. Future Work
-
-If you had more time, how would you improve this recommender
-
-Examples:
-
-- Add support for multiple users and "group vibe" recommendations
-- Balance diversity of songs instead of always picking the closest match
-- Use more features, like tempo ranges or lyric themes
-
----
-
-## 9. Personal Reflection
-
-A few sentences about what you learned:
-
-- What surprised you about how your system behaved
-- How did building this change how you think about real music recommenders
-- Where do you think human judgment still matters, even if the model seems "smart"
-
+- Add user session history so recommendations improve across conversations
+- Support group recommendations ("find a game we can all play")
+- Cache embedded games locally to reduce API calls on repeat queries
+- Expand scoring with playtime estimates and difficulty preferences
