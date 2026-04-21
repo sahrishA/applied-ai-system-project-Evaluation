@@ -1,8 +1,5 @@
-pandas
 pytest
-streamlit
 requests
 python-dotenv
-anthropic
 chromadb
 sentence-transformers

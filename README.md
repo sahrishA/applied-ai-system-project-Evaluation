@@ -1,8 +1,8 @@
-# Video Game Recommender with RAG
+# Video Game Recommender
 
 ## Project Summary
 
-A conversational video game recommender that asks you for your favorite games and uses Retrieval-Augmented Generation (RAG) to suggest titles you might enjoy. The system fetches live game data from the IGDB API, embeds game descriptions into a vector database for semantic search, and uses Claude to generate personalized recommendations with natural language explanations.
+A terminal-based video game recommender. Tell it your favorite games and it fetches live data from the IGDB API, builds a preference profile from your favorites, and ranks a broad catalog using a hybrid score: metadata matching (genre, platform, rating) combined with semantic similarity via a local RAG pipeline (ChromaDB + sentence-transformers). No Claude API or internet LLM required.
 
 ---
 
@@ -11,15 +11,17 @@ A conversational video game recommender that asks you for your favorite games an
 ```
 User names favorite games
         ↓
-IGDB API → fetch game metadata + descriptions
+IGDB API → fetch metadata for favorites
         ↓
-Embed descriptions → store in ChromaDB vector store
+Derive genre profile from favorites
         ↓
-Semantic search → retrieve most similar games
+Fetch broad catalog from IGDB (seed titles)
         ↓
-Claude API → generate personalized explanation
+Embed catalog descriptions → ChromaDB vector store
         ↓
-Streamlit chat UI → display recommendations
+Semantic search (RAG) + metadata scoring → combined rank
+        ↓
+Print top 5 recommendations in terminal
 ```
 
 ### Components
@@ -27,18 +29,23 @@ Streamlit chat UI → display recommendations
 | Component | File | Role |
 |---|---|---|
 | IGDB Client | `src/igdb_client.py` | Authenticates with Twitch OAuth and queries the IGDB game database |
-| Recommender | `src/recommender.py` | Scores and ranks games using metadata + semantic similarity |
-| RAG Pipeline | `src/rag.py` | Embeds game descriptions and retrieves similar games via ChromaDB |
-| Chat UI | `src/main.py` | Streamlit bot interface that drives the conversation |
+| Recommender | `src/recommender.py` | Scores games using genre, platform, and rating metadata |
+| RAG Pipeline | `src/rag.py` | Embeds game descriptions locally and retrieves semantically similar games via ChromaDB |
+| Main | `src/main.py` | Interactive terminal app — collects input, runs the pipeline, prints results |
+| Reddit Client | `src/reddit_client.py` | Fetches posts from gaming subreddits (available for future use) |
 
-### Scoring Features
+### Scoring
 
-Game recommendations are ranked using a hybrid approach:
+Game recommendations use a hybrid approach (no LLM needed):
 
-- **Semantic similarity** — embedding distance between game descriptions (RAG retrieval)
-- **Genre match** — how closely genres align with the user's stated preferences
-- **Platform match** — whether games are available on preferred platforms
-- **Rating** — IGDB community rating as a quality signal
+| Signal | Weight | Source |
+|---|---|---|
+| Genre match | 30 % of metadata | Proportion of user's favorite genres found in game |
+| Platform match | 18 % of metadata | Any overlap between preferred and available platforms |
+| Rating | 12 % of metadata | IGDB community rating normalized to 0–1 |
+| Semantic similarity | 40 % total | Cosine distance between game summaries (sentence-transformers) |
+
+Metadata score accounts for 60 % of the final rank; semantic similarity accounts for 40 %.
 
 ---
 
@@ -47,8 +54,7 @@ Game recommendations are ranked using a hybrid approach:
 ### Prerequisites
 
 - Python 3.10+
-- A [Twitch Developer account](https://dev.twitch.tv/console) for IGDB API access
-- An [Anthropic API key](https://console.anthropic.com/) for Claude-powered explanations
+- A [Twitch Developer account](https://dev.twitch.tv/console) for IGDB API access (free)
 
 ### 1. Clone the repo
 
@@ -67,72 +73,72 @@ source .venv/bin/activate   # Mac / Linux
 
 ### 3. Install dependencies
 
-**Essential (IGDB client):**
 ```bash
-py -m pip install requests python-dotenv
+pip install -r requirements.txt
 ```
 
-**Full install (RAG + UI):**
-```bash
-py -m pip install -r requirements.txt
-```
+> The first run will download the `all-MiniLM-L6-v2` sentence-transformers model (~80 MB) automatically.
 
 ### 4. Set up credentials
 
-Create a `.env` file in the project root (this file is git-ignored and must never be committed):
+Create a `.env` file in the project root:
 
 ```
 IGDB_CLIENT_ID=your_twitch_client_id
 IGDB_CLIENT_SECRET=your_twitch_client_secret
-ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-To get IGDB credentials:
-1. Sign in at [dev.twitch.tv/console](https://dev.twitch.tv/console)
-2. Register a new application — set OAuth Redirect URL to `http://localhost`
-3. Copy the **Client ID** and generate a **Client Secret**
+To get these: log in to [dev.twitch.tv/console](https://dev.twitch.tv/console), create an application, and copy the Client ID and Secret.
 
-### 5. Run the app
+### 5. Run
 
 ```bash
-py -m streamlit run src/main.py
+py -m src.main
 ```
 
-### Running Tests
+**Example session:**
+
+```
+====================================================
+        Video Game Recommender
+====================================================
+
+Enter your favorite games (one per line, blank line when done):
+  > Hollow Knight
+  > Celeste
+  >
+
+What platforms do you play on? (comma-separated)
+  e.g. PC, Nintendo Switch, PS5
+  > PC, Switch
+
+Minimum rating threshold (0–100, default 70):
+  >
+
+Fetching your favorites from IGDB...
+  Found: Hollow Knight (2017)
+  Found: Celeste (2018)
+
+Building game catalog...
+  42 games loaded.
+
+Running semantic search...
+
+====================================================
+       Top Recommendations For You
+====================================================
+
+1. Ori and the Blind Forest (2015)  —  Score: 0.81
+   Why: Matches your genre(s): Platform, Indie; Available on PC (Microsoft Windows); Highly rated (87/100)
+   "A platformer set in a dying forest..."
+
+2. ...
+```
+
+---
+
+## Running Tests
 
 ```bash
-py -m pytest
+py -m pytest tests/
 ```
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `requests` | HTTP calls to the IGDB API |
-| `python-dotenv` | Loads credentials from `.env` |
-| `anthropic` | Claude API for generating recommendation explanations |
-| `chromadb` | Vector database for semantic game search (RAG retrieval) |
-| `sentence-transformers` | Converts game descriptions into embedding vectors |
-| `streamlit` | Chat UI |
-| `pandas` | Local game data caching |
-| `pytest` | Unit tests |
-
----
-
-## Limitations and Known Biases
-
-- **Popularity bias** — IGDB ratings skew toward well-known AAA titles; niche or indie games may be under-recommended
-- **Description quality** — RAG retrieval quality depends on how well IGDB's summaries describe a game; sparse summaries produce weaker embeddings
-- **Cold start** — recommendations improve as more games are embedded into the vector store over time
-- **Language** — the system currently only handles English-language queries and game descriptions
-
----
-
-## Future Work
-
-- Add user session history so recommendations improve across conversations
-- Support group recommendations ("find a game we can all play")
-- Cache embedded games locally to reduce API calls on repeat queries
-- Expand scoring with playtime estimates and difficulty preferences

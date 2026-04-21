@@ -9,6 +9,13 @@ Two sources are stored in one collection, distinguished by metadata:
     source = "reddit" — posts from r/ShouldIbuythisgame, r/patientgamers
 """
 
+import contextlib
+import io
+import os
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
@@ -24,7 +31,9 @@ DB_PATH = "data/chromadb"
 class GameRAG:
     def __init__(self):
         self._client = chromadb.PersistentClient(path=DB_PATH)
-        self._ef = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+        _sink = io.StringIO()
+        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+            self._ef = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
         self._collection = self._client.get_or_create_collection(
             name="game_knowledge",
             embedding_function=self._ef,
