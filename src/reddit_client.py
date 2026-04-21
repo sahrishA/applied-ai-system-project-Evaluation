@@ -12,6 +12,7 @@ import requests
 RECOMMENDATION_SUBREDDITS = [
     "ShouldIbuythisgame",
     "patientgamers",
+    "gamingsuggestions",
 ]
 
 # Reddit blocks default User-Agent — this identifies our app politely

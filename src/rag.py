@@ -10,6 +10,7 @@ Two sources are stored in one collection, distinguished by metadata:
 """
 
 import contextlib
+import hashlib
 import io
 import os
 
@@ -70,12 +71,16 @@ class GameRAG:
         Returns the number of documents added.
         """
         docs, ids, metas = [], [], []
+        seen: set[str] = set()
         for post in posts:
             text = post.get("text", "").strip()
             if not text:
                 continue
-            # Build a stable ID from subreddit + hash of text
-            doc_id = f"reddit_{post.get('subreddit', 'unknown')}_{abs(hash(text)) % 1_000_000}"
+            key = post.get("url") or text
+            doc_id = f"reddit_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+            if doc_id in seen:
+                continue
+            seen.add(doc_id)
             docs.append(text)
             ids.append(doc_id)
             metas.append({

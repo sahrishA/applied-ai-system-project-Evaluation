@@ -4,31 +4,32 @@ Interactive terminal Video Game Recommender.
 Flow:
   1. Ask the user to name their favorite games.
   2. Fetch those games from IGDB to derive a genre/platform profile.
-  3. Expand the catalog with a broad set of seed titles via IGDB.
-  4. Score every catalog game using metadata (genre, platform, rating)
-     combined with semantic similarity from the RAG pipeline.
-  5. Print the top 5 recommendations with scores and reasons.
+  3. Search Reddit (r/patientgamers, r/ShouldIbuythisgame) for posts about
+     each favorite to discover community-recommended titles.
+  4. Extract candidate game titles from Reddit posts, look them up on IGDB.
+  5. Score every catalog game using metadata (genre, platform, rating)
+     combined with semantic similarity from the RAG pipeline (which includes
+     Reddit post text for community-sourced context).
+  6. Print the top 5 recommendations with scores and reasons.
 """
 
+import re
 import sys
 
 from src.igdb_client import search_games
 from src.recommender import UserGameProfile, Game, igdb_result_to_game, score_game
 from src.rag import GameRAG
+from src.reddit_client import fetch_game_posts, fetch_top_posts, fetch_post_comments
 
-# Broad seed titles used to populate the catalog beyond the user's favorites
-CATALOG_SEEDS = [
-    "Dark Souls", "Sekiro", "Bloodborne", "Elden Ring",
-    "Celeste", "Hollow Knight", "Ori and the Blind Forest",
-    "The Witcher 3", "Baldur's Gate 3", "Divinity Original Sin 2",
-    "Stardew Valley", "Animal Crossing", "Terraria", "Minecraft",
-    "Hades", "Dead Cells", "Returnal", "Cuphead",
-    "Portal 2", "Disco Elysium", "Outer Wilds", "Subnautica",
-    "Red Dead Redemption 2", "God of War", "Horizon Zero Dawn",
-    "Factorio", "RimWorld", "Into the Breach",
-    "Undertale", "Omori", "Deltarune",
-    "Monster Hunter World", "Devil May Cry 5",
-    "Persona 5", "Final Fantasy XIV", "Octopath Traveler",
+# Fallback seed titles used only when Reddit yields too few candidates
+_FALLBACK_SEEDS = [
+    "Dark Souls", "Sekiro", "Elden Ring",
+    "Celeste", "Hollow Knight",
+    "The Witcher 3", "Baldur's Gate 3",
+    "Hades", "Dead Cells",
+    "Portal 2", "Disco Elysium", "Outer Wilds",
+    "Factorio", "RimWorld",
+    "Undertale", "Omori",
 ]
 
 _PLATFORM_ALIASES = {
@@ -83,6 +84,112 @@ def _ask_min_rating() -> float:
         return max(0.0, min(100.0, float(raw)))
     except ValueError:
         return 70.0
+
+
+# ---------------------------------------------------------------------------
+# Reddit catalog discovery
+# ---------------------------------------------------------------------------
+
+_SKIP_FIRST_WORDS = {
+    "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or",
+    "but", "so", "if", "is", "it", "i", "my", "we", "he", "she", "they",
+    "you", "this", "that", "these", "those", "just", "been", "have",
+    "what", "when", "where", "who", "how", "why", "which", "also", "not",
+}
+
+# 2-5 word Title Case phrases; allows numbers and Roman numerals (e.g. "Resident Evil 3")
+_TITLE_CASE = re.compile(
+    r'\b([A-Z][a-z]+(?:\s+(?:[A-Z][a-z0-9]*|[0-9]+|[IVX]{2,})){1,4})\b'
+)
+
+
+_QUOTED = re.compile(r'"([^"]{3,50})"')
+
+
+def _extract_titles_from_posts(posts: list[dict]) -> list[str]:
+    """Pull candidate game titles from Reddit posts and comments."""
+    seen: set[str] = set()
+    titles: list[str] = []
+
+    for post in posts:
+        post_title = post.get("title", "")
+        body = post.get("body", "")
+        subreddit = post.get("subreddit", "").lower()
+
+        # Title case from structured post titles only (reliable signal)
+        for match in _TITLE_CASE.finditer(post_title):
+            candidate = match.group(1).strip()
+            if candidate.split()[0].lower() in _SKIP_FIRST_WORDS:
+                continue
+            low = candidate.lower()
+            if low not in seen:
+                seen.add(low)
+                titles.append(candidate)
+
+        # Quoted strings from bodies/comments (people quote game names)
+        for match in _QUOTED.finditer(body):
+            candidate = match.group(1).strip()
+            low = candidate.lower()
+            if low not in seen:
+                seen.add(low)
+                titles.append(candidate)
+
+        # Subreddit post titles are often just the game name
+        if subreddit in ("shouldibuythisgame", "gamingsuggestions"):
+            clean = re.sub(
+                r"^(should i buy|is |are |does |thoughts on |review[:]?\s*"
+                r"|games like |similar to |looking for games like )\s*",
+                "",
+                post_title,
+                flags=re.I,
+            ).rstrip("?!. ")
+            if 3 < len(clean) < 60 and clean.lower() not in seen:
+                seen.add(clean.lower())
+                titles.append(clean)
+
+    return titles
+
+
+def _fetch_reddit_catalog(favorite_games: list[Game]) -> tuple[list[str], list[dict]]:
+    """Search Reddit for posts about each favorite, plus top subreddit posts.
+
+    Returns (candidate_titles, all_posts).
+    """
+    all_posts: list[dict] = []
+
+    for game in favorite_games:
+        posts = fetch_game_posts(game.title)
+        all_posts.extend(posts)
+        print(f"  \"{game.title}\": {len(posts)} Reddit post(s) found")
+
+        # Fetch comments from the top 3 posts — comments contain the actual recommendations
+        top_posts = sorted(posts, key=lambda p: p.get("score", 0), reverse=True)[:3]
+        comment_count = 0
+        for post in top_posts:
+            permalink = post["url"].replace("https://www.reddit.com", "")
+            for comment in fetch_post_comments(permalink, limit=10):
+                all_posts.append({
+                    "title": "",
+                    "body": comment,
+                    "text": comment,
+                    "url": "",
+                    "score": 0,
+                    "subreddit": post.get("subreddit", ""),
+                    "game": game.title,
+                })
+                comment_count += 1
+        print(f"  \"{game.title}\": {comment_count} comment(s) fetched")
+
+    for subreddit in ["ShouldIbuythisgame", "patientgamers", "gamingsuggestions"]:
+        posts = fetch_top_posts(subreddit, limit=25)
+        all_posts.extend(posts)
+        print(f"  r/{subreddit}: {len(posts)} top post(s) fetched")
+
+    titles = _extract_titles_from_posts(all_posts)
+    # Cap candidates to avoid hammering IGDB with thousands of noisy titles
+    titles = titles[:150]
+    print(f"  Extracted {len(titles)} candidate title(s) from Reddit")
+    return titles, all_posts
 
 
 # ---------------------------------------------------------------------------
@@ -146,20 +253,38 @@ def main() -> None:
         min_rating=min_rating,
     )
 
-    # 3. Build a broader catalog (seed titles, excluding known favorites)
-    print("\nBuilding game catalog...")
-    catalog = _fetch_games(CATALOG_SEEDS, limit_per_title=2)
+    # 3. Build catalog from Reddit suggestions
+    print("\nSearching Reddit for suggestions...")
+    reddit_titles, reddit_posts = _fetch_reddit_catalog(favorite_games)
+
+    print("\nFetching catalog games from IGDB...")
+    catalog = _fetch_games(reddit_titles, limit_per_title=1)
     catalog = [g for g in catalog if g.id not in favorite_ids and g.rating >= min_rating]
-    print(f"  {len(catalog)} games loaded.")
+    print(f"  {len(catalog)} game(s) from Reddit sources.")
+
+    # Supplement with fallback seeds if catalog is too thin
+    if len(catalog) < 15:
+        print("  Catalog too small — supplementing with fallback seeds.")
+        seed_games = _fetch_games(_FALLBACK_SEEDS, limit_per_title=2)
+        existing_ids = {g.id for g in catalog}
+        for g in seed_games:
+            if g.id not in favorite_ids and g.id not in existing_ids and g.rating >= min_rating:
+                catalog.append(g)
+                existing_ids.add(g.id)
+
+    print(f"  {len(catalog)} total games loaded.")
 
     if not catalog:
         print("\nNo catalog games met your rating threshold. Try lowering it.")
         sys.exit(1)
 
-    # 4. RAG — embed catalog, query with each favorite's summary
+    # 4. RAG — embed catalog games + Reddit posts, query with each favorite
     print("\nRunning semantic search...")
     rag = GameRAG()
     rag.add_games(catalog)
+    if reddit_posts:
+        indexed = rag.add_reddit_posts(reddit_posts)
+        print(f"  Indexed {indexed} Reddit post(s).")
 
     rag_scores: dict[int, float] = {}
     for fav in favorite_games:

@@ -38,10 +38,14 @@ def _headers() -> dict:
 
 def search_games(query: str, limit: int = 10) -> list[dict]:
     """Search IGDB for games matching a title string."""
+    # Strip characters that break IGDB's query syntax
+    safe_query = query.replace('"', '').replace(';', '').replace('\\', '').strip()
+    if not safe_query:
+        return []
     body = (
         f'fields name, summary, genres.name, platforms.name, '
         f'rating, first_release_date; '
-        f'search "{query}"; '
+        f'search "{safe_query}"; '
         f'limit {limit};'
     )
     response = requests.post(f"{IGDB_BASE_URL}/games", headers=_headers(), data=body)
